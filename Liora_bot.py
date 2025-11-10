@@ -2,7 +2,7 @@ import telebot
 import time
 
 TOKEN = "8496421317:AAF-p8T-RiZ2by6hCrNTOtcKKXweafLxnSo"
-
+8496421317"
 bot = telebot.TeleBot(TOKEN)
 
 @bot.message_handler(commands=['start', 'help'])
