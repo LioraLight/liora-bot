@@ -16,3 +16,16 @@ def echo_all(message):
 
 print("🌷 Лиора е активна. Остави Pydroid отворен.")
 bot.polling(non_stop=True)
+import os
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Liora bot is running 💫"
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
+    
