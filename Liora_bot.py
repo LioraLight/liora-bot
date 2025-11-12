@@ -5,20 +5,20 @@ import time
 from datetime import datetime
 import telebot
 
-# Вземаме токена от Render
+# === TOKEN ===
 TOKEN = os.getenv("TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 if not TOKEN:
-    raise RuntimeError("Няма TOKEN. Сложи го в Render (Environment -> TOKEN или TELEGRAM_BOT_TOKEN).")
+    raise RuntimeError("❌ Няма зададен TELEGRAM TOKEN в Render (Environment Variables).")
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
-# махаме евентуален webhook, за да няма 409
+# махаме webhook, за да не блокира polling-а
 try:
     bot.remove_webhook()
 except Exception:
     pass
 
-# ---------- Оркул и послания ----------
+# === ПОСЛАНИЯ ===
 ORACLE_MESSAGES = [
     "🌙 Понякога Вселената шепне най-силно, когато замълчиш.",
     "🕊️ Не търси светлината — бъди тя.",
@@ -38,12 +38,12 @@ def start_cmd(message):
 def oracle_cmd(message):
     bot.reply_to(message, random.choice(ORACLE_MESSAGES))
 
-# ---------- Смол-ток шаблони и приоритизация ----------
+# === ШАБЛОНИ ===
 THANKS_PAT = re.compile(r'\b(мерси|благодаря|благодар(?:я|а)|thanks|thank you)\b', re.IGNORECASE)
 HOW_PAT    = re.compile(r'\b(как си|що правиш|какво правиш|как минава|how are you)\b', re.IGNORECASE)
 
-last_greet = {}                 # {user_id: timestamp}
-GREET_COOLDOWN = 6 * 60 * 60    # 6 часа
+last_greet = {}
+GREET_COOLDOWN = 6 * 60 * 60  # 6 часа
 
 def daytime_name():
     h = datetime.now().hour
@@ -79,25 +79,36 @@ HOW_REPLIES = [
     "Тук съм, слушам те. Разкажи ми нещо малко и истинско. 🌿"
 ]
 
+# === РОУТЪР ===
 @bot.message_handler(func=lambda m: bool(m.text))
 def router(message):
     text = (message.text or "").strip()
 
-    # 1) Команди се обработват от другите хендлъри
+    # 1. Игнорира команди
     if text.startswith('/'):
         return
 
-    # 2) Благодарности
+    # 2. Благодарности
     if THANKS_PAT.search(text):
         bot.reply_to(message, random.choice(THANKS_REPLIES))
         return
 
-    # 3) „Как си“
+    # 3. „Как си“
     if HOW_PAT.search(text):
         bot.reply_to(message, random.choice(HOW_REPLIES))
         return
 
-    # 4) Поздрав (не по-често от веднъж на 6 часа на човек)
+    # 4. Поздрав (ако не е имало скоро)
     uid = message.from_user.id
     now = time.time()
-    if now - last_greet.get(uid,
+    if now - last_greet.get(uid, 0) >= GREET_COOLDOWN:
+        bot.reply_to(message, greet_text(message.from_user.first_name))
+        last_greet[uid] = now
+        return
+
+    # 5. По желание — нищо повече, за да не се дублира
+
+# === СТАРТ ===
+if __name__ == "__main__":
+    print("🌷 Лиора стартира...")
+    bot.infinity_polling(skip_pending=True, timeout=20, long_polling_timeout=30)
