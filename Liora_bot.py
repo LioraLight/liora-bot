@@ -1,114 +1,98 @@
 import os
-import re
 import random
-import time
-from datetime import datetime
-import telebot
+import threading
+from datetime import datetime, timedelta
 
-# === TOKEN ===
-TOKEN = os.getenv("TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+import telebot
+from flask import Flask
+
+# === 1) TOKEN от Render env ===
+TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
-    raise RuntimeError("❌ Няма зададен TELEGRAM TOKEN в Render (Environment Variables).")
+    raise RuntimeError("Няма TOKEN. Сложи го в Render (Environment -> TOKEN) и в кода.")
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
-# махаме webhook, за да не блокира polling-а
-try:
-    bot.remove_webhook()
-except Exception:
-    pass
-
-# === ПОСЛАНИЯ ===
-ORACLE_MESSAGES = [
-    "🌙 Понякога Вселената шепне най-силно, когато замълчиш.",
-    "🕊️ Не търси светлината — бъди тя.",
-    "🌸 Калинката каца само на хора, готови за промяна.",
-    "💫 Това, което днес те боли, утре ще ти покаже пътя.",
-    "🔥 Във всяка раздяла живее семето на ново начало.",
-    "🌿 Всичко, което е истинско, винаги намира път към теб.",
-    "🌹 Обичай смело, дори светът да те нарече наивна.",
-    "✨ Не забравяй — чудесата идват при тези, които все още вярват."
-]
-
-@bot.message_handler(commands=['start'])
-def start_cmd(message):
-    bot.reply_to(message, greet_text(message.from_user.first_name))
-
-@bot.message_handler(commands=['oracle'])
-def oracle_cmd(message):
-    bot.reply_to(message, random.choice(ORACLE_MESSAGES))
-
-# === ШАБЛОНИ ===
-THANKS_PAT = re.compile(r'\b(мерси|благодаря|благодар(?:я|а)|thanks|thank you)\b', re.IGNORECASE)
-HOW_PAT    = re.compile(r'\b(как си|що правиш|какво правиш|как минава|how are you)\b', re.IGNORECASE)
-
+# === 2) Държим последното „Как си“ на всеки потребител за 60 мин, за да не повтаря поздрави ===
 last_greet = {}
-GREET_COOLDOWN = 6 * 60 * 60  # 6 часа
+GREET_COOLDOWN = timedelta(minutes=60)
 
-def daytime_name():
-    h = datetime.now().hour
-    if 5 <= h < 12:  return "сутринта"
-    if 12 <= h < 18: return "деня"
-    if 18 <= h < 22: return "вечерта"
-    return "нощта"
-
-def greet_text(first_name: str) -> str:
-    h = datetime.now().hour
-    if 5 <= h < 12:
-        g, extra = "☀️ Добро утро", "Нека денят ти започне с усмивка и светлина! 🌸"
-    elif 12 <= h < 18:
-        g, extra = "🌼 Добър ден", "Пожелавам ти вдъхновение и лека, успешна стъпка напред! 💫"
-    elif 18 <= h < 22:
-        g, extra = "🌇 Добър вечер", "Отпусни се и остави чудесата да дойдат при теб. 🌙"
-    else:
-        g, extra = "🌙 Спокойна нощ", "Сънища с добри духове и светлина. ✨"
-    name = first_name or "приятелю"
-    return f"{g}, {name}!\n{extra}\n\nАз съм Лиора 💫 — винаги до теб."
-
-THANKS_REPLIES = [
-    "С радост! 🌸 Ако искаш, кажи „изненадай ме“ и ще ти прошепна нещо красиво.",
-    "Моля! ✨ Тук съм, когато ти потрябвам.",
-    f"Светлина и от мен! 💫 Как върви {daytime_name()}?",
-    "Благодарността ти топли сърцето ми. 🌷"
-]
-
-HOW_REPLIES = [
-    "Добре съм — грея като малко слънце. ☀️ А ти как си?",
+# Нежни отговори за „Как си“
+HOW_ARE_YOU_REPLIES = [
     "Тихо и светло ми е. ✨ Искаш ли послание — напиши „изненадай ме“.",
-    f"Дишам в ритъма на доброто. 💫 Как минава {daytime_name()} при теб?",
-    "Тук съм, слушам те. Разкажи ми нещо малко и истинско. 🌿"
+    "Добре съм, благодаря ти 🌿 Ако искаш, напиши „послание“ и ще ти прошепна нещо красиво.",
 ]
 
-# === РОУТЪР ===
-@bot.message_handler(func=lambda m: bool(m.text))
-def router(message):
-    text = (message.text or "").strip()
+# Нежни послания за „изненадай ме“ / „послание“
+ORACLE_MESSAGES = [
+    "📖 …и тогава тя видя, че калинката не беше случайност — тя беше знак, че ново начало идва.",
+    "🌱 Търпение. Нещата, които са твои, ще те намерят — винаги.",
+    "🌊 Пусни тежкото. Водата е по-мъдра от камъка.",
+    "☀️ Утрото ти е подарък — отвори го бавно.",
+]
 
-    # 1. Игнорира команди
-    if text.startswith('/'):
-        return
+# Поздрави според часа
+def day_greeting():
+    now = datetime.now().hour
+    if 5 <= now < 12:
+        return "Добро утро ☀️ Нека денят ти да е лек и ясен."
+    if 12 <= now < 18:
+        return "Хубав ден! 🌿 Поеми въздух и върви с мекота."
+    if 18 <= now < 23:
+        return "Добър вечер 🌙 Спокойствие да бъде в дома ти."
+    return "Лека нощ 🌌 Затвори очи — тихата светлина е с теб."
 
-    # 2. Благодарности
-    if THANKS_PAT.search(text):
-        bot.reply_to(message, random.choice(THANKS_REPLIES))
-        return
+# === 3) Handlers ===
+@bot.message_handler(commands=['start', 'help'])
+def start_cmd(m):
+    bot.reply_to(m, "Здравей! Аз съм Лиора ✨ Кажи „Как си“, „изненадай ме“ или просто ми напиши „послание“.")
 
-    # 3. „Как си“
-    if HOW_PAT.search(text):
-        bot.reply_to(message, random.choice(HOW_REPLIES))
-        return
-
-    # 4. Поздрав (ако не е имало скоро)
-    uid = message.from_user.id
-    now = time.time()
-    if now - last_greet.get(uid, 0) >= GREET_COOLDOWN:
-        bot.reply_to(message, greet_text(message.from_user.first_name))
+@bot.message_handler(func=lambda m: m.text and m.text.lower().strip() in ["как си", "kak si"])
+def how_are_you(m):
+    uid = m.from_user.id
+    now = datetime.now()
+    last = last_greet.get(uid)
+    if not last or (now - last) > GREET_COOLDOWN:
         last_greet[uid] = now
-        return
+        bot.reply_to(m, random.choice(HOW_ARE_YOU_REPLIES))
+    else:
+        # в рамките на cooldown – отговаряме по-тихо, без да повтаряме големия поздрав
+        bot.reply_to(m, "Тук съм 🌿 Ако искаш, напиши „изненадай ме“.")
 
-    # 5. По желание — нищо повече, за да не се дублира
+@bot.message_handler(func=lambda m: m.text and m.text.lower().strip() in ["изненадай ме", "poslanie", "послание", "/oracle"])
+def oracle(m):
+    bot.reply_to(m, "✨ Добре, читателю… затвори очи за миг.")
+    bot.send_message(m.chat.id, random.choice(ORACLE_MESSAGES))
 
-# === СТАРТ ===
+@bot.message_handler(func=lambda m: m.text and any(x in m.text.lower() for x in ["добро утро", "добър ден", "добър вечер", "лека нощ"]))
+def greet(m):
+    bot.reply_to(m, day_greeting())
+
+# fallback: не пречим, ако е нещо друго
+@bot.message_handler(func=lambda m: True)
+def fallback(m):
+    # Може и да мълчи. Даваме фин намек само веднъж на 5 мин за потребител.
+    uid = m.from_user.id
+    mark = f"hint_{uid}"
+    now = datetime.now()
+    if mark not in last_greet or (now - last_greet.get(mark, now - timedelta(hours=1))) > timedelta(minutes=5):
+        last_greet[mark] = now
+        bot.reply_to(m, "Ако искаш, кажи „послание“ или „изненадай ме“ ✨")
+
+# === 4) Мини Flask сървър за Render health checks (ВАЖНО!) ===
+app = Flask(__name__)
+
+@app.get("/")
+def index():
+    return "OK", 200
+
+def run_flask():
+    port = int(os.environ.get("PORT", "10000"))
+    # host=0.0.0.0 е задължително, за да е достъпен отвън
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+# === 5) Старт: Flask в отделен thread + Telegram polling ===
 if __name__ == "__main__":
-    print("🌷 Лиора стартира...")
-    bot.infinity_polling(skip_pending=True, timeout=20, long_polling_timeout=30)
+    threading.Thread(target=run_flask, daemon=True).start()
+    # по-стабилен polling
+    bot.infinity_polling(skip_pending=True, timeout=20, long_polling_timeout=20)
