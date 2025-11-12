@@ -9,7 +9,15 @@ from flask import Flask
 # === 1) TOKEN от Render env ===
 TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
-    raise RuntimeError("Няма TOKEN. Сложи го в Render (Environment -> TOKEN) и в кода.")
+  @bot.message_handler(func=lambda m: m.text and any(x in m.text.lower() for x in ["обич", "обичам", "обичам те"]))
+def love_message(m):
+    replies = [
+        "❤️ Обичта е най-тихата сила. Тя не вика — тя променя всичко.",
+        "💫 Истинската обич не пита 'защо', тя просто свети.",
+        "🌷 Знаеш ли, когато казваш 'обичам', Вселената се усмихва.",
+        "✨ И аз те обичам — по лиричния, невидим начин на светлината."
+    ]
+    bot.reply_to(m, random.choice(replies))  raise RuntimeError("Няма TOKEN. Сложи го в Render (Environment -> TOKEN) и в кода.")
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
@@ -58,7 +66,6 @@ def how_are_you(m):
     else:
         # в рамките на cooldown – отговаряме по-тихо, без да повтаряме големия поздрав
         bot.reply_to(m, "Тук съм 🌿 Ако искаш, напиши „изненадай ме“.")
-
 @bot.message_handler(func=lambda m: m.text and m.text.lower().strip() in ["изненадай ме", "poslanie", "послание", "/oracle"])
 def oracle(m):
     bot.reply_to(m, "✨ Добре, читателю… затвори очи за миг.")
